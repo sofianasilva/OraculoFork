@@ -1,0 +1,100 @@
+volumes:
+  open_webui_data:
+  postgres_data:
+
+networks:
+  open:
+    driver: bridge
+  oraculo:
+
+services:
+  db:
+    container_name: db-container
+    build:
+      context: .
+      dockerfile: .docker/db/Dockerfile
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "${EXPOSED_DB_PORT}:${DB_PORT}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - oraculo
+      - open
+
+  auth-service:
+    container_name: auth-service-container
+    build:
+      context: .
+      dockerfile: .docker/auth-service/Dockerfile
+    environment:
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
+      - DEBUG=${DEBUG}
+      - DJANGO_SETTINGS_MODULE=auth_service.settings
+      - PYTHONPATH=/app/src
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+    ports:
+      - "8001:8001"
+    depends_on:
+      - db
+    volumes:
+      - .:/app
+    networks:
+      - oraculo
+      - open
+    command: ["bash", "scripts/django-startup.sh"]
+  
+  back-end:
+    container_name: py-container
+    build: 
+      context: .
+      dockerfile: .docker/back-end/Dockerfile
+    volumes:
+      - .:/app  # Monta o código local (opcional, para desenvolvimento)
+      - /var/run/docker.sock:/var/run/docker.sock  # Monta o socket do host
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_URL=${DB_URL}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL_NAME=${GEMINI_MODEL_NAME}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+    command: ["python", "main.py", "--etl"]
+    ports:
+      - 8000:8000
+    depends_on:
+      - db
+    networks:
+      - open
+      - oraculo
+
+  front-end:
+    container_name: open-webui-container
+    build:
+      context: .
+      dockerfile: .docker/front-end/Dockerfile
+    ports:
+      - 3000:8080
+    volumes:
+      - open_webui_data:/app/backend/data
+    restart: unless-stopped
+    depends_on:
+      - db
+      - back-end
+    networks:
+      - oraculo
